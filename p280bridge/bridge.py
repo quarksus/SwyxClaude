@@ -4,6 +4,7 @@ import logging
 import queue
 import re
 import socket
+import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -32,6 +33,7 @@ class Bridge:
         self.source = audio.find_node("sources", cfg.mic_match or cfg.device_match)
         self.speaker = audio.Speaker(audio.find_node("sinks", cfg.device_match))
         self.awaiting_permission = False
+        self._permission_since = 0.0
         self._stop = threading.Event()
 
     # --- events -------------------------------------------------------------
@@ -128,6 +130,7 @@ class Bridge:
     def session(self):
         """Off-hook: read out anything pending, record until the handset is put down, then send."""
         log.info("session start")
+        self.awaiting_permission = False  # never carry a permission dialog over from an earlier call
         self.speaker.tone([660, 880])
         self.handle_note(self.pop_latest_note())
         pool = ThreadPoolExecutor(max_workers=1)  # one worker: Whisper runs one job at a time
@@ -155,9 +158,14 @@ class Bridge:
         if not note:
             return
         self.awaiting_permission = note["kind"] == "permission_prompt"
+        self._permission_since = time.time()
         self.say(note["text"])
 
     def send_to_claude(self, text):
+        # A spoken yes/no only answers the dialog it was read out for; if you touched the keyboard
+        # since, the dialog may already be gone and Enter/Esc would hit something else.
+        if self.awaiting_permission and self.host.last_keyboard > self._permission_since:
+            self.awaiting_permission = False
         if self.awaiting_permission and self.cfg.voice_permissions:
             self.awaiting_permission = False
             word = normalize(text)

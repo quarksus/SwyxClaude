@@ -15,6 +15,7 @@ class PtyHost:
     def __init__(self, argv):
         self.argv = argv
         self.master = None
+        self.last_keyboard = 0.0  # time of the last real keystroke from the user's terminal
         self._lock = __import__("threading").Lock()
 
     def _resize(self, *_):
@@ -65,6 +66,7 @@ class PtyHost:
                     data = os.read(sys.stdin.fileno(), 4096)
                     if not data:
                         break
+                    self.last_keyboard = time.time()
                     self.send(data)
                 if proc.poll() is not None and self.master not in r:
                     break
