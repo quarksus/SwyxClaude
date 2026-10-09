@@ -76,11 +76,12 @@ def rms(frame: bytes) -> float:
     return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
 
 
-def record_utterance(source, cfg, should_stop, interrupt=lambda: False):
+def record_utterance(source, cfg, should_stop, interrupt=lambda: False, stats=None):
     """Capture one spoken utterance with an energy VAD.
 
     Returns (reason, samples): reason is 'speech', 'stopped' (phone hung up),
     or 'interrupt' (interrupt() fired before the user started talking).
+    If given, stats receives the peak level and the speech threshold (for diagnostics).
     """
     proc = subprocess.Popen(
         ["parec", f"--device={source}", f"--rate={RATE}", "--channels=1",
@@ -109,9 +110,12 @@ def record_utterance(source, cfg, should_stop, interrupt=lambda: False):
             while len(buf) >= FRAME_BYTES:
                 frame, buf = buf[:FRAME_BYTES], buf[FRAME_BYTES:]
                 level = rms(frame)
-                if len(noise) < 8:  # calibrate on the first ~240 ms
+                if stats is not None:
+                    stats["peak"] = max(stats.get("peak", 0.0), level)
+                    stats["threshold"] = threshold
+                if len(noise) < 8:  # calibrate on the first ~240 ms (median ignores a stray click)
                     noise.append(level)
-                    threshold = max(cfg.min_rms, 3 * float(np.mean(noise)))
+                    threshold = max(cfg.min_rms, 2.5 * float(np.median(noise)))
                     preroll.append(frame)
                     continue
                 if not speaking:

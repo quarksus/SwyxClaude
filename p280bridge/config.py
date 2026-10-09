@@ -23,7 +23,7 @@ class Config:
     auto_submit: bool = True               # press Enter after typing the transcript
     silence_seconds: float = 1.5           # end of utterance after this much silence
     max_utterance_seconds: float = 90.0
-    min_rms: float = 250.0                 # lowest speech energy threshold (int16 RMS)
+    min_rms: float = 120.0                 # lowest speech energy threshold (int16 RMS)
     ring_method: str = "auto"              # auto (HID, tone fallback) | hid | tone | both
     ring_seconds: float = 1.5
     speak_replies: bool = True             # read Claude's question/answer aloud after pickup
