@@ -6,8 +6,7 @@ import unittest
 import numpy as np
 
 from p280bridge import notify, tts
-from p280bridge.audio import end_pause, rms
-from p280bridge.config import Config
+from p280bridge.audio import rms
 from p280bridge.bridge import normalize
 from p280bridge.hid import parse_input_report
 
@@ -94,13 +93,6 @@ class MiscTests(unittest.TestCase):
         out = tts.clean_for_speech("Use `ls`.\n```\nrm -rf /\n```\nSee https://x.io", 200)
         self.assertNotIn("rm -rf", out)
         self.assertNotIn("https", out)
-
-    def test_end_pause_grows_with_length(self):
-        cfg = Config()
-        self.assertAlmostEqual(end_pause(1.0, cfg), 0.8)
-        self.assertAlmostEqual(end_pause(12.0, cfg), 2.0)
-        self.assertAlmostEqual(end_pause(60.0, cfg), 2.0)
-        self.assertLess(end_pause(5.0, cfg), end_pause(9.0, cfg))
 
     def test_rms(self):
         self.assertEqual(rms(np.zeros(480, dtype=np.int16).tobytes()), 0.0)

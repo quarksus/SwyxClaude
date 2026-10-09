@@ -21,9 +21,8 @@ class Config:
     whisper_model: str = "base"            # tiny/base/small/medium/large-v3 (small = more accurate, ~3x slower)
     language: str | None = None            # None = auto-detect (de/en/...)
     auto_submit: bool = True               # press Enter after typing the transcript
-    silence_seconds: float = 0.8           # pause that ends a short phrase
-    max_silence_seconds: float = 2.0       # pause that ends a long prompt (patience grows with length)
-    max_utterance_seconds: float = 90.0
+    silence_seconds: float = 0.8           # pause used to split long speech so it is transcribed while you talk
+    max_utterance_seconds: float = 60.0    # longest single chunk before it is split anyway
     min_rms: float = 120.0                 # lowest speech energy threshold (int16 RMS)
     ring_method: str = "auto"              # auto (HID, tone fallback) | hid | tone | both
     ring_seconds: float = 1.5

@@ -144,15 +144,16 @@ def test_hook(cfg) -> hid.Phone:
 
 def listen_once(cfg, phone, source, stt):
     deadline = time.time() + 20
-    stats = {}
-    reason, samples = audio.record_utterance(
-        source, cfg, lambda: time.time() > deadline or not phone.offhook, stats=stats)
-    if reason != "speech":
+    stats, chunks = {}, []
+    audio.capture_session(
+        source, cfg, lambda: bool(chunks) or time.time() > deadline or not phone.offhook,
+        chunks.append, stats=stats)
+    if not chunks:
         why = "the handset was put down" if not phone.offhook and time.time() < deadline else "timed out"
         print(f"  Heard nothing ({why}). Loudest sound: {stats.get('peak', 0):.0f}, "
               f"needed above: {stats.get('threshold', 0):.0f}.")
         return None
-    text, lang = stt.transcribe(samples)
+    text, lang = stt.transcribe(chunks[0])
     print(f"  I understood ({lang}): \"{text}\"")
     return text
 

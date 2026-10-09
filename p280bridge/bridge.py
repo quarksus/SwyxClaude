@@ -5,6 +5,7 @@ import queue
 import re
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from . import audio, notify, tts
 from .config import RUNTIME_DIR, SOCKET_PATH
@@ -125,18 +126,30 @@ class Bridge:
         return note
 
     def session(self):
+        """Off-hook: read out anything pending, record until the handset is put down, then send."""
         log.info("session start")
         self.speaker.tone([660, 880])
         self.handle_note(self.pop_latest_note())
-        while self.phone.offhook and not self._stop.is_set():
-            reason, samples = audio.record_utterance(
-                self.source, self.cfg, lambda: not self.phone.offhook,
-                interrupt=lambda: not self.notes.empty())
-            if reason == "interrupt":
-                self.handle_note(self.pop_latest_note())
-            elif reason == "speech":
-                self.handle_speech(samples)
-        log.info("session end")
+        pool = ThreadPoolExecutor(max_workers=1)  # one worker: Whisper runs one job at a time
+        jobs = []
+        if self.phone.offhook:
+            audio.capture_session(
+                self.source, self.cfg, lambda: not self.phone.offhook or self._stop.is_set(),
+                lambda samples: jobs.append(pool.submit(self._transcribe, samples)))
+        # Handset down = finished talking. Chunks were transcribed while speaking.
+        results = [j.result() for j in jobs]
+        pool.shutdown()
+        text = " ".join(t for t in results if t).strip()
+        log.info("session end, %d chunk(s): %r", len(jobs), text)
+        if text:
+            self.send_to_claude(text)
+
+    def _transcribe(self, samples) -> str:
+        try:
+            return self.stt.transcribe(samples)[0]
+        except Exception:
+            log.exception("transcription failed")
+            return ""
 
     def handle_note(self, note):
         if not note:
@@ -144,15 +157,7 @@ class Bridge:
         self.awaiting_permission = note["kind"] == "permission_prompt"
         self.say(note["text"])
 
-    def handle_speech(self, samples):
-        try:
-            text, lang = self.stt.transcribe(samples)
-        except Exception:
-            log.exception("transcription failed")
-            self.speaker.tone([300, 200])
-            return
-        if not text:
-            return
+    def send_to_claude(self, text):
         if self.awaiting_permission and self.cfg.voice_permissions:
             self.awaiting_permission = False
             word = normalize(text)

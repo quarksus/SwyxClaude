@@ -109,20 +109,16 @@ def rms(frame: bytes) -> float:
     return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
 
 
-def end_pause(spoken_seconds: float, cfg) -> float:
-    """Silence needed to end an utterance: short phrases end fast, long prompts get more patience
-    (people pause to think mid-sentence). Ramps from silence_seconds (<=3 s spoken) up to
-    max_silence_seconds (>=12 s spoken)."""
-    t = min(1.0, max(0.0, (spoken_seconds - 3.0) / 9.0))
-    return cfg.silence_seconds + t * (cfg.max_silence_seconds - cfg.silence_seconds)
+MIN_VOICED_MS = 300  # ignore clicks/blips shorter than this
 
 
-def record_utterance(source, cfg, should_stop, interrupt=lambda: False, stats=None):
-    """Capture one spoken utterance with an energy VAD.
+def capture_session(source, cfg, should_stop, on_chunk, stats=None):
+    """Listen on one continuous capture stream until should_stop() is true.
 
-    Returns (reason, samples): reason is 'speech', 'stopped' (phone hung up),
-    or 'interrupt' (interrupt() fired before the user started talking).
-    If given, stats receives the peak level and the speech threshold (for diagnostics).
+    Speech is cut into chunks at pauses (cfg.silence_seconds) and handed to on_chunk(samples)
+    as int16 arrays, so transcription can run while the user is still talking. Whatever is
+    still being said when should_stop() fires is flushed as a last chunk.
+    stats (optional dict) receives the peak level and speech threshold for diagnostics.
     """
     proc = subprocess.Popen(
         ["parec", f"--device={source}", f"--rate={RATE}", "--channels=1",
@@ -131,22 +127,25 @@ def record_utterance(source, cfg, should_stop, interrupt=lambda: False, stats=No
     buf = b""
     frames: list[bytes] = []
     preroll: list[bytes] = []
-    noise = []
+    noise: list[float] = []
     threshold = cfg.min_rms
-    loud = 0
+    loud = voiced = silent = 0
     speaking = False
-    silent = 0
+
+    def flush():
+        nonlocal frames, speaking, loud, voiced, silent
+        if speaking and voiced * FRAME_MS >= MIN_VOICED_MS:
+            on_chunk(np.frombuffer(b"".join(frames), dtype=np.int16))
+        frames, speaking, loud, voiced, silent = [], False, 0, 0, 0
+        preroll.clear()
+
     try:
-        while True:
-            if should_stop():
-                return "stopped", None
-            if not speaking and interrupt():
-                return "interrupt", None
+        while not should_stop():
             if not select.select([proc.stdout], [], [], 0.1)[0]:
                 continue
             chunk = os.read(proc.stdout.fileno(), 4096)
             if not chunk:
-                return "stopped", None
+                break
             buf += chunk
             while len(buf) >= FRAME_BYTES:
                 frame, buf = buf[:FRAME_BYTES], buf[FRAME_BYTES:]
@@ -161,19 +160,20 @@ def record_utterance(source, cfg, should_stop, interrupt=lambda: False, stats=No
                     continue
                 if not speaking:
                     preroll.append(frame)
-                    preroll = preroll[-12:]
+                    del preroll[:-12]
                     loud = loud + 1 if level > threshold else 0
                     if loud >= 3:
-                        speaking = True
-                        frames = list(preroll)
-                        silent = 0
+                        speaking, frames, silent, voiced = True, list(preroll), 0, loud
+                    continue
+                frames.append(frame)
+                if level < threshold * 0.6:
+                    silent += 1
                 else:
-                    frames.append(frame)
-                    silent = silent + 1 if level < threshold * 0.6 else 0
-                    spoken = (len(frames) - silent) * FRAME_MS / 1000
-                    if silent * FRAME_MS / 1000 >= end_pause(spoken, cfg) or \
-                            len(frames) * FRAME_MS / 1000 >= cfg.max_utterance_seconds:
-                        return "speech", np.frombuffer(b"".join(frames), dtype=np.int16)
+                    silent, voiced = 0, voiced + 1
+                if silent * FRAME_MS / 1000 >= cfg.silence_seconds or \
+                        len(frames) * FRAME_MS / 1000 >= cfg.max_utterance_seconds:
+                    flush()
+        flush()
     finally:
         proc.kill()
         proc.wait()

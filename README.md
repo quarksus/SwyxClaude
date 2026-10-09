@@ -2,12 +2,11 @@
 
 Talk to Claude Code with a Swyx P280 USB phone.
 
-1. **Pick up the handset** → a rising beep means it is listening. Speak your prompt.
-2. After a short pause (0.8 s, up to 2 s for long prompts) the speech is transcribed locally (faster-whisper, German/English
-   auto-detected) and **typed into Claude Code's prompt** (and submitted).
-3. When Claude **stops or needs you** (finished answer / question / permission dialog) and the phone
-   is on the hook, it **rings once**. Pick up: Claude's message is read aloud (Piper TTS), then you reply.
-   If you are already on the phone, the message is read aloud immediately.
+1. **Pick up the handset** → a rising beep means it is listening. Speak your prompt, as long as you like
+   and with any pauses. It is transcribed in the background while you talk.
+2. **Put the handset down** = you are done. The text is typed into Claude Code's prompt and submitted.
+3. When Claude **stops or needs you** (finished answer / question / permission dialog) it **rings once**.
+   Pick up: Claude's message is read aloud (Piper TTS), then speak your reply and hang up to send it.
 
 Claude Code runs inside the bridge (`p280-bridge run` wraps `claude` in a pty), so you see everything
 in the same terminal. Hooks (`Stop`, `Notification`) are injected with `claude --settings`, so your
@@ -45,7 +44,6 @@ whisper_model = "small"    # more accurate, ~3x slower than the default "base"
 mic_match = "StreamCam"    # use another microphone (substring of its name) if the phone mic does not work
 language = "de"            # skip auto-detection
 auto_submit = false        # only type the text, press Enter yourself
-max_silence_seconds = 3.0  # pause that ends a long prompt (short phrases end after silence_seconds = 0.8)
 ring_method = "tone"       # auto | hid | tone | both
 voice_permissions = false  # don't answer permission dialogs by voice
 ```
