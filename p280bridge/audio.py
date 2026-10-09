@@ -109,6 +109,14 @@ def rms(frame: bytes) -> float:
     return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
 
 
+def end_pause(spoken_seconds: float, cfg) -> float:
+    """Silence needed to end an utterance: short phrases end fast, long prompts get more patience
+    (people pause to think mid-sentence). Ramps from silence_seconds (<=3 s spoken) up to
+    max_silence_seconds (>=12 s spoken)."""
+    t = min(1.0, max(0.0, (spoken_seconds - 3.0) / 9.0))
+    return cfg.silence_seconds + t * (cfg.max_silence_seconds - cfg.silence_seconds)
+
+
 def record_utterance(source, cfg, should_stop, interrupt=lambda: False, stats=None):
     """Capture one spoken utterance with an energy VAD.
 
@@ -162,7 +170,8 @@ def record_utterance(source, cfg, should_stop, interrupt=lambda: False, stats=No
                 else:
                     frames.append(frame)
                     silent = silent + 1 if level < threshold * 0.6 else 0
-                    if silent * FRAME_MS / 1000 >= cfg.silence_seconds or \
+                    spoken = (len(frames) - silent) * FRAME_MS / 1000
+                    if silent * FRAME_MS / 1000 >= end_pause(spoken, cfg) or \
                             len(frames) * FRAME_MS / 1000 >= cfg.max_utterance_seconds:
                         return "speech", np.frombuffer(b"".join(frames), dtype=np.int16)
     finally:
