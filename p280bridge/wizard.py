@@ -9,12 +9,13 @@ import time
 from . import audio, config, hid
 
 # Must sort before 73-seat-late.rules, which turns the uaccess tag into a per-user ACL.
-# GROUP=plugdev is a fallback for sessions without a logind seat.
+# No group access: only the user at the active login seat gets the device (the phone has a
+# microphone, so it should not be readable by every member of some group).
 UDEV_RULE = ('KERNEL=="hidraw*", ATTRS{idVendor}=="2603", ATTRS{idProduct}=="0280", '
-             'GROUP="plugdev", MODE="0660", TAG+="uaccess"\n'
+             'MODE="0660", TAG+="uaccess"\n'
              '# raw USB access, used by the direct-USB audio mode\n'
              'SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2603", ATTR{idProduct}=="0280", '
-             'GROUP="plugdev", MODE="0660", TAG+="uaccess"\n')
+             'MODE="0660", TAG+="uaccess"\n')
 UDEV_FILE = "/etc/udev/rules.d/70-swyx-p280.rules"
 OLD_UDEV_FILE = "/etc/udev/rules.d/99-swyx-p280.rules"  # earlier versions: ran too late to work
 TOOLS = {"pactl": "pulseaudio-utils", "pw-play": "pipewire-bin", "parec": "pulseaudio-utils",
@@ -97,8 +98,8 @@ def setup_access():
         if not wait_for(lambda: hid.find_hidraw() and can_open(), 15, "  Still no access."):
             dev = hid.find_hidraw()
             subprocess.run(["ls", "-l", dev])
-            sys.exit(f"Setup failed: still no permission for {dev}. Is your user in the 'plugdev' "
-                     f"group (`groups`)? Check {UDEV_FILE}.")
+            sys.exit(f"Setup failed: still no permission for {dev}. The rule only grants access to the "
+                     f"user logged in at the local seat (not over ssh). Check {UDEV_FILE}.")
     print("  Access granted.")
 
 
