@@ -23,7 +23,7 @@ def set_rate(h, hz):
     h.controlWrite(0x22, 0x01, 0x0100, EP_IN, struct.pack("<I", hz)[:3], 1000)
 
 
-def capture(h, seconds=2.0):
+def capture(ctx, h, seconds=2.0):
     stats = collections.Counter()
     sizes = collections.Counter()
     data = bytearray()
@@ -50,7 +50,7 @@ def capture(h, seconds=2.0):
         xfers.append(t)
     end = time.time() + seconds
     while time.time() < end:
-        h.getContext().handleEventsTimeout(0.1)
+        ctx.handleEventsTimeout(0.1)
     done[0] = True
     for t in xfers:
         try:
@@ -58,7 +58,7 @@ def capture(h, seconds=2.0):
         except usb1.USBError:
             pass
     for _ in range(5):
-        h.getContext().handleEventsTimeout(0.05)
+        ctx.handleEventsTimeout(0.05)
     names = {0: "OK", 1: "ERROR", 2: "TIMED_OUT", 3: "CANCELLED", 4: "STALL", 5: "NO_DEVICE", 6: "OVERFLOW"}
     st = ", ".join(f"{names.get(k, k)}={v}" for k, v in stats.items())
     sz = ", ".join(f"{k}B x{v}" for k, v in sorted(sizes.items(), key=lambda kv: -kv[1])[:5])
@@ -95,7 +95,7 @@ def main():
                     set_rate(h, m["rate"])
             except usb1.USBError as e:
                 print(f"  (rate request failed: {e})")
-            print(f"{label}: {capture(h)}", flush=True)
+            print(f"{label}: {capture(ctx, h)}", flush=True)
         h.setInterfaceAltSetting(IFACE_IN, 0)
         h.setInterfaceAltSetting(IFACE_OUT, 0)
     finally:
