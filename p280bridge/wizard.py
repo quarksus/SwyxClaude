@@ -8,9 +8,12 @@ import time
 
 from . import audio, config, hid
 
+# Must sort before 73-seat-late.rules, which turns the uaccess tag into a per-user ACL.
+# GROUP=plugdev is a fallback for sessions without a logind seat.
 UDEV_RULE = ('KERNEL=="hidraw*", ATTRS{idVendor}=="2603", ATTRS{idProduct}=="0280", '
-             'MODE="0660", TAG+="uaccess"\n')
-UDEV_FILE = "/etc/udev/rules.d/99-swyx-p280.rules"
+             'GROUP="plugdev", MODE="0660", TAG+="uaccess"\n')
+UDEV_FILE = "/etc/udev/rules.d/70-swyx-p280.rules"
+OLD_UDEV_FILE = "/etc/udev/rules.d/99-swyx-p280.rules"  # earlier versions: ran too late to work
 TOOLS = {"pactl": "pulseaudio-utils", "pw-play": "pipewire-bin", "parec": "pulseaudio-utils",
          "claude": "Claude Code (https://claude.com/claude-code)"}
 
@@ -76,6 +79,7 @@ def setup_access():
     print("  This installs a udev rule (needs sudo):\n   ", UDEV_FILE)
     if not ask("  Install it now?"):
         sys.exit("Cannot continue without access to the phone.")
+    subprocess.run(["sudo", "rm", "-f", OLD_UDEV_FILE], check=True)
     subprocess.run(["sudo", "tee", UDEV_FILE], input=UDEV_RULE.encode(), check=True,
                    stdout=subprocess.DEVNULL)
     subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
@@ -84,7 +88,10 @@ def setup_access():
     if not can_open():
         input("  Unplug the phone, plug it back in, then press Enter... ")
         if not wait_for(lambda: hid.find_hidraw() and can_open(), 15, "  Still no access."):
-            sys.exit("Setup failed: no permission for the phone. Check the udev rule.")
+            dev = hid.find_hidraw()
+            subprocess.run(["ls", "-l", dev])
+            sys.exit(f"Setup failed: still no permission for {dev}. Is your user in the 'plugdev' "
+                     f"group (`groups`)? Check {UDEV_FILE}.")
     print("  Access granted.")
 
 
