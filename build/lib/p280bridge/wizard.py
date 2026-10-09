@@ -1,0 +1,193 @@
+"""First-run setup wizard: dependencies, phone access, models, and hardware checks."""
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+from . import audio, config, hid
+
+UDEV_RULE = ('KERNEL=="hidraw*", ATTRS{idVendor}=="2603", ATTRS{idProduct}=="0280", '
+             'MODE="0660", TAG+="uaccess"\n')
+UDEV_FILE = "/etc/udev/rules.d/99-swyx-p280.rules"
+TOOLS = {"pactl": "pulseaudio-utils", "pw-play": "pipewire-bin", "parec": "pulseaudio-utils",
+         "claude": "Claude Code (https://claude.com/claude-code)"}
+
+
+def ask(question: str, default: bool = True) -> bool:
+    hint = "[Y/n]" if default else "[y/N]"
+    while True:
+        a = input(f"{question} {hint} ").strip().lower()
+        if not a:
+            return default
+        if a in ("y", "yes", "j", "ja"):
+            return True
+        if a in ("n", "no", "nein"):
+            return False
+
+
+def step(n, title):
+    print(f"\n[{n}] {title}")
+
+
+def check_tools():
+    step(1, "Checking required tools")
+    missing = [t for t in TOOLS if not shutil.which(t)]
+    for t in TOOLS:
+        print(f"  {'ok     ' if t not in missing else 'MISSING'} {t}")
+    if missing:
+        print("\nInstall the missing tools (Debian/Ubuntu: sudo apt install "
+              + " ".join(sorted({TOOLS[t] for t in missing if t != 'claude'})) + ") and run again.")
+        sys.exit(1)
+
+
+def wait_for(cond, seconds, msg):
+    end = time.time() + seconds
+    while time.time() < end:
+        if cond():
+            return True
+        time.sleep(0.5)
+    print(msg)
+    return False
+
+
+def detect_phone():
+    step(2, "Looking for the Swyx P280")
+    while not hid.find_hidraw():
+        input("  Phone not found. Plug the Swyx P280 into USB, then press Enter... ")
+    print(f"  Found phone at {hid.find_hidraw()}")
+
+
+def can_open() -> bool:
+    try:
+        os.close(os.open(hid.find_hidraw(), os.O_RDWR))
+        return True
+    except OSError:
+        return False
+
+
+def setup_access():
+    step(3, "Phone access permissions")
+    if can_open():
+        print("  Already allowed.")
+        return
+    print("  Your user may not access the phone's button/ring interface yet.")
+    print("  This installs a udev rule (needs sudo):\n   ", UDEV_FILE)
+    if not ask("  Install it now?"):
+        sys.exit("Cannot continue without access to the phone.")
+    subprocess.run(["sudo", "tee", UDEV_FILE], input=UDEV_RULE.encode(), check=True,
+                   stdout=subprocess.DEVNULL)
+    subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
+    subprocess.run(["sudo", "udevadm", "trigger"], check=True)
+    time.sleep(1)
+    if not can_open():
+        input("  Unplug the phone, plug it back in, then press Enter... ")
+        if not wait_for(lambda: hid.find_hidraw() and can_open(), 15, "  Still no access."):
+            sys.exit("Setup failed: no permission for the phone. Check the udev rule.")
+    print("  Access granted.")
+
+
+def download_models(cfg):
+    step(4, "Downloading speech models (one-time, ~700 MB)")
+    config.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    if not all((config.PIPER_DIR / f"{v}.onnx").exists() for v in config.VOICES):
+        print("  Text-to-speech voices (English, German)...")
+        subprocess.run([sys.executable, "-m", "piper.download_voices", "--data-dir",
+                        str(config.PIPER_DIR), *config.VOICES], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"  Speech recognition model '{cfg.whisper_model}'...")
+    from .stt import Transcriber
+    Transcriber(cfg).load()
+    print("  Models ready.")
+
+
+def test_speaker(cfg):
+    step(5, "Speaker test")
+    speaker = audio.Speaker(audio.find_node("sinks", cfg.device_match))
+    while True:
+        print("  Playing 3 beeps (lift the handset if you hear nothing)...")
+        speaker.tone([440, 660, 880], seconds=0.4)
+        if ask("  Did you hear them on the phone?"):
+            return
+        if not ask("  Try again?"):
+            print("  Continuing, but check your audio setup.")
+            return
+
+
+def test_hook(cfg) -> hid.Phone:
+    step(6, "Hook switch test")
+    events = []
+    phone = hid.Phone(lambda off: events.append(off), invert_hook=False)
+    phone.start()
+    input("  Put the handset on the cradle, then press Enter... ")
+    del events[:]
+    print("  Now LIFT the handset...")
+    if not wait_for(lambda: events, 30, "  No event seen."):
+        sys.exit("The hook switch was not detected. Run `p280-bridge monitor` to debug.")
+    invert = events[0] is False
+    if invert:
+        print("  Your phone reports the hook state inverted; compensating.")
+    config.save(invert_hook=invert)
+    phone.invert_hook = invert
+    phone.offhook = True
+    print("  Hook switch works.")
+    return phone
+
+
+def test_microphone(cfg, phone):
+    step(7, "Microphone test (keep the handset lifted)")
+    from .stt import Transcriber
+    stt = Transcriber(cfg)
+    source = audio.find_node("sources", cfg.device_match)
+    print("  Say a short sentence, e.g. \"Hello Claude, can you hear me?\"")
+    deadline = time.time() + 30
+    reason, samples = audio.record_utterance(
+        source, cfg, lambda: time.time() > deadline or not phone.offhook)
+    if reason != "speech":
+        print("  Nothing heard. Check the microphone with `p280-bridge devices`; continuing anyway.")
+        return
+    text, lang = stt.transcribe(samples)
+    print(f"  I understood ({lang}): \"{text}\"")
+    if not ask("  Is that about right?"):
+        print("  Tip: set whisper_model = \"medium\" in", config.CONFIG_FILE)
+
+
+def test_ring(cfg, phone):
+    step(8, "Ring test")
+    print("  Put the handset back on the cradle.")
+    wait_for(lambda: not phone.offhook, 30, "  (still lifted — continuing)")
+    input("  Press Enter and the phone should ring once... ")
+    try:
+        phone.ring(cfg.ring_seconds)
+        rang = ask("  Did the phone ring?")
+    except OSError as e:
+        print(f"  Ring command failed: {e}")
+        rang = False
+    if rang:
+        config.save(ring_method="hid")
+    else:
+        print("  Using a ring tone through the phone speaker instead.")
+        config.save(ring_method="tone")
+
+
+def run():
+    print("=== Swyx P280 + Claude Code: first-time setup ===")
+    if not sys.stdin.isatty():
+        sys.exit("Setup is interactive; run `p280-bridge init` in a terminal.")
+    check_tools()
+    detect_phone()
+    setup_access()
+    cfg = config.load()
+    download_models(cfg)
+    test_speaker(cfg)
+    phone = test_hook(cfg)
+    cfg = config.load()
+    try:
+        test_microphone(cfg, phone)
+        test_ring(cfg, phone)
+    finally:
+        phone.close()
+    config.INIT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    config.INIT_MARKER.write_text(str(time.time()))
+    print("\nSetup complete! Start with:  p280-bridge run")

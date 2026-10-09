@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "p280-bridge"
+version = "0.1.0"
+description = "Talk to Claude Code with a Swyx P280 USB phone"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["faster-whisper", "piper-tts", "numpy"]
+
+[project.scripts]
+p280-bridge = "p280bridge.__main__:main"
+
+[tool.setuptools]
+packages = ["p280bridge"]

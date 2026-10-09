@@ -1,4 +1,0 @@
-#!/bin/sh
-# Launcher: ./p280-bridge run [claude args]
-cd "$(dirname "$0")" || exit 1
-exec .venv/bin/python -m p280bridge "$@"

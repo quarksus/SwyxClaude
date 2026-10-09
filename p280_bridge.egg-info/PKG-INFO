@@ -1,3 +1,13 @@
+Metadata-Version: 2.4
+Name: p280-bridge
+Version: 0.1.0
+Summary: Talk to Claude Code with a Swyx P280 USB phone
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: faster-whisper
+Requires-Dist: piper-tts
+Requires-Dist: numpy
+
 # P280 Claude Bridge
 
 Talk to Claude Code with a Swyx P280 USB phone.
@@ -13,28 +23,23 @@ Claude Code runs inside the bridge (`p280-bridge run` wraps `claude` in a pty), 
 in the same terminal. Hooks (`Stop`, `Notification`) are injected with `claude --settings`, so your
 own Claude settings are not touched.
 
-## Install
-
-Requires Linux with PipeWire/PulseAudio, Python 3.11+, [pipx](https://pipx.pypa.io) and the `claude` CLI.
+## Setup
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/quarksus/SwyxClaude/main/install.sh | sh
+./scripts/setup.sh           # venv, deps, Piper voices, Whisper "small" model (~700 MB total)
+./scripts/install-udev.sh    # once: lets your user access the phone's HID interface; replug phone
 ```
-
-or `pipx install git+https://github.com/quarksus/SwyxClaude`.
 
 ## Use
 
 ```sh
-p280-bridge run            # extra args go to claude, e.g. p280-bridge run --resume
+./p280-bridge run            # starts claude; extra args are passed to claude, e.g. run --resume
+./p280-bridge monitor        # print hook-switch / button events
+./p280-bridge probe-ring     # pulse the P280's LEDs/ring to see which output bit rings
+./p280-bridge devices        # show detected HID / audio nodes
 ```
 
-The **first run starts a setup wizard** that checks the tools, finds the phone, installs the udev rule
-(asks for sudo once), downloads the speech models (~700 MB), and tests speaker, hook switch, microphone
-and ring. Re-run it any time with `p280-bridge init`.
-
-Other commands: `monitor` (print hook/button events), `probe-ring`, `devices`.
-Logs: `~/.local/state/p280-bridge/bridge.log` (`BRIDGE_DEBUG=1` for more).
+Logs: `~/.local/state/p280-bridge/bridge.log` (set `BRIDGE_DEBUG=1` for more).
 
 ## Configuration
 
@@ -56,5 +61,5 @@ See `p280bridge/config.py` for all options.
   it. Only exact words count; disable with `voice_permissions = false`.
 - The P280 appears to deliver no microphone audio while on-hook, which is fine here (we only listen off-hook).
 - The HID ring (output report 2, bit 0) depends on the phone firmware; if the phone doesn't physically
-  ring, the wizard switches to `ring_method = "tone"` (or set it yourself) (plays a ring tone through the phone speaker).
-- Development: `python3 -m venv .venv && .venv/bin/pip install -e . && .venv/bin/python -m unittest discover -s tests`.
+  ring, use `ring_method = "tone"` (plays a ring tone through the phone speaker).
+- Tests: `.venv/bin/python -m unittest discover -s tests`. `p280_test.py` is the standalone hardware test.

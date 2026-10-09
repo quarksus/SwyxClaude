@@ -1,0 +1,2 @@
+[console_scripts]
+p280-bridge = p280bridge.__main__:main
