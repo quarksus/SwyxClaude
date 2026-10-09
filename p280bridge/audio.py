@@ -33,17 +33,31 @@ def list_sources() -> list[str]:
     return [l.split("\t")[1] for l in out.splitlines() if not l.split("\t")[1].endswith(".monitor")]
 
 
+def tone_pcm(freqs, seconds=0.15, volume=0.4) -> bytes:
+    """Consecutive sine tones as 16 kHz mono s16 PCM (with short fades to avoid clicks)."""
+    n = int(RATE * seconds)
+    i = np.arange(n)
+    fade = np.minimum(1.0, np.minimum(i / 160, (n - i) / 160))
+    parts = [(32767 * volume * np.sin(2 * math.pi * f * i / RATE) * fade).astype(np.int16) for f in freqs]
+    return np.concatenate(parts).tobytes() if parts else b""
+
+
 def tone_wav(path: str, freqs, seconds=0.15, volume=0.4):
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(RATE)
-        for f in freqs:
-            n = int(RATE * seconds)
-            w.writeframes(b"".join(
-                struct.pack("<h", int(32767 * volume * math.sin(2 * math.pi * f * i / RATE)
-                                      * min(1, i / 160, (n - i) / 160)))
-                for i in range(n)))
+        w.writeframes(tone_pcm(freqs, seconds, volume))
+
+
+def to_16k(pcm: bytes, rate: int) -> bytes:
+    """Resample mono s16 PCM to 16 kHz (linear interpolation; fine for speech)."""
+    if rate == RATE or not pcm:
+        return pcm
+    x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+    n_out = int(len(x) * RATE / rate)
+    pos = np.arange(n_out) * (rate / RATE)
+    return np.interp(pos, np.arange(len(x)), x).astype(np.int16).tobytes()
 
 
 class Speaker:
@@ -113,6 +127,50 @@ def rms(frame: bytes) -> float:
 MIN_VOICED_MS = 300  # ignore clicks/blips shorter than this
 
 
+class PipeWireMic:
+    """Stream object for capture_session backed by `parec`."""
+
+    def __init__(self, node: str):
+        self.node = node
+        self.proc = None
+
+    def open(self):
+        self.proc = subprocess.Popen(
+            ["parec", f"--device={self.node}", f"--rate={RATE}", "--channels=1",
+             "--format=s16le", "--latency-msec=30"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+
+    def read(self, timeout: float):
+        """Bytes read ('' if none yet), or None at end of stream."""
+        if not select.select([self.proc.stdout], [], [], timeout)[0]:
+            return b""
+        return os.read(self.proc.stdout.fileno(), 4096) or None
+
+    def close(self):
+        if self.proc:
+            self.proc.kill()
+            self.proc.wait()
+
+
+class AudioIO:
+    """The phone's microphone source and speaker, plus a close() for the chosen backend."""
+
+    def __init__(self, mic, speaker, close=lambda: None):
+        self.mic, self.speaker, self.close = mic, speaker, close
+
+
+def open_audio(cfg) -> AudioIO:
+    """PipeWire (default) or direct USB (cfg.audio_backend == "usb") audio for the phone."""
+    if cfg.audio_backend == "usb":
+        from .usbaudio import UsbPhoneAudio, UsbSpeaker
+        usb = UsbPhoneAudio()
+        usb.start()
+        mic = cfg.mic_match and find_node("sources", cfg.mic_match) or usb.mic()
+        return AudioIO(mic, UsbSpeaker(usb), usb.close)
+    return AudioIO(find_node("sources", cfg.mic_match or cfg.device_match),
+                   Speaker(find_node("sinks", cfg.device_match)))
+
+
 def capture_session(source, cfg, should_stop, on_chunk, stats=None, idle_timeout=None):
     """Listen on one continuous capture stream until should_stop() is true.
 
@@ -123,10 +181,8 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None, idle_timeout
     If idle_timeout (seconds) is set and nobody speaks for that long, the last chunk is flushed
     and "timeout" is returned; otherwise returns "stopped".
     """
-    proc = subprocess.Popen(
-        ["parec", f"--device={source}", f"--rate={RATE}", "--channels=1",
-         "--format=s16le", "--latency-msec=30"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+    stream = PipeWireMic(source) if isinstance(source, str) else source
+    stream.open()
     buf = b""
     frames: list[bytes] = []
     preroll: list[bytes] = []
@@ -148,11 +204,11 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None, idle_timeout
             if idle_timeout and time.monotonic() - last_voice > idle_timeout:
                 flush()
                 return "timeout"
-            if not select.select([proc.stdout], [], [], 0.1)[0]:
-                continue
-            chunk = os.read(proc.stdout.fileno(), 4096)
-            if not chunk:
+            chunk = stream.read(0.1)
+            if chunk is None:
                 break
+            if not chunk:
+                continue
             buf += chunk
             while len(buf) >= FRAME_BYTES:
                 frame, buf = buf[:FRAME_BYTES], buf[FRAME_BYTES:]
@@ -185,5 +241,4 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None, idle_timeout
         flush()
         return "stopped"
     finally:
-        proc.kill()
-        proc.wait()
+        stream.close()

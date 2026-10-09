@@ -6,6 +6,7 @@ Commands:
   monitor             print hook-switch / button events
   probe-ring          pulse each LED bit of the phone to find the ring
   devices             show detected phone / audio nodes
+  usb-test            test the direct-USB audio mode (mic + speaker)
 """
 import json
 import logging
@@ -88,6 +89,31 @@ def cmd_probe_ring(_):
     print("If the phone never rang, set ring_method = \"tone\" in", config.CONFIG_FILE)
 
 
+def cmd_usb_test(_):
+    """Direct-USB audio check: beep, record 5 s from the phone mic, play it back, transcribe."""
+    from . import audio
+    from .stt import Transcriber
+    cfg = config.load()
+    cfg.audio_backend, cfg.mic_match = "usb", ""
+    io = audio.open_audio(cfg)
+    try:
+        io.speaker.tone([660, 880])
+        print("Speak for 5 seconds (handset lifted)...")
+        chunks = []
+        deadline = time.time() + 5
+        audio.capture_session(io.mic, cfg, lambda: time.time() > deadline, chunks.append)
+        if not chunks:
+            print("Heard nothing.")
+            return
+        import numpy as np
+        samples = np.concatenate(chunks)
+        print("Playing it back...")
+        io.speaker.play_pcm(samples.tobytes())
+        print("Understood:", Transcriber(cfg).transcribe(samples)[0])
+    finally:
+        io.close()
+
+
 def cmd_devices(_):
     from . import audio, hid
     print("hidraw:", hid.find_hidraw())
@@ -96,7 +122,7 @@ def cmd_devices(_):
     print("sink:  ", audio.find_node("sinks", cfg.device_match))
 
 
-COMMANDS = {"run": cmd_run, "init": cmd_init, "monitor": cmd_monitor, "probe-ring": cmd_probe_ring, "devices": cmd_devices}
+COMMANDS = {"run": cmd_run, "init": cmd_init, "usb-test": cmd_usb_test, "monitor": cmd_monitor, "probe-ring": cmd_probe_ring, "devices": cmd_devices}
 
 
 def main():

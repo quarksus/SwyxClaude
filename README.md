@@ -35,6 +35,16 @@ and ring. Re-run it any time with `p280-bridge init`.
 Other commands: `monitor` (print hook/button events), `probe-ring`, `devices`.
 Logs: `~/.local/state/p280-bridge/bridge.log` (`BRIDGE_DEBUG=1` for more).
 
+## If the phone's microphone gives no audio (direct USB mode)
+
+Some P280s deliver no microphone audio through the Linux sound driver (kernel log:
+`frame 0 active: -75`, `cannot get freq at ep 0x82`): the phone only streams its microphone while
+the playback interface is active and then sends packets the kernel driver sizes too small.
+`p280-bridge init` detects this and offers **direct USB mode** (`audio_backend = "usb"`): the bridge
+talks to the phone's audio endpoints itself with libusb. While it runs, the phone's normal sound card
+disappears from the system (it comes back when the bridge exits). Check it with `p280-bridge usb-test`.
+Diagnostics used to find this live in `tools/`.
+
 ## Configuration
 
 Optional `~/.config/p280-bridge/config.toml`, e.g.:
@@ -46,6 +56,7 @@ language = "de"            # skip auto-detection
 auto_submit = false        # only type the text, press Enter yourself
 idle_timeout_seconds = 10  # lifted but silent this long: send what was said and end the call (0 = off)
 ring_method = "tone"       # auto | hid | tone | both
+audio_backend = "usb"      # pipewire (default) | usb = direct USB audio for the phone
 voice_permissions = false  # don't answer permission dialogs by voice
 ```
 

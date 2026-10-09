@@ -16,5 +16,6 @@ p280bridge/notify.py
 p280bridge/ptyhost.py
 p280bridge/stt.py
 p280bridge/tts.py
+p280bridge/usbaudio.py
 p280bridge/wizard.py
 tests/test_bridge.py

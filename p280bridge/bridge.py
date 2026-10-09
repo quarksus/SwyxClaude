@@ -30,8 +30,9 @@ class Bridge:
         self.wake = threading.Event()
         self.stt = Transcriber(cfg)
         self.phone = Phone(self._on_hook, self._on_button, cfg.invert_hook)
-        self.source = audio.find_node("sources", cfg.mic_match or cfg.device_match)
-        self.speaker = audio.Speaker(audio.find_node("sinks", cfg.device_match))
+        self.audio = audio.open_audio(cfg)
+        self.source = self.audio.mic
+        self.speaker = self.audio.speaker
         self.awaiting_permission = False
         self._permission_since = 0.0
         self._stop = threading.Event()
@@ -194,4 +195,5 @@ class Bridge:
     def close(self):
         self._stop.set()
         self.phone.close()
+        self.audio.close()
         SOCKET_PATH.unlink(missing_ok=True)

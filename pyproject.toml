@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Talk to Claude Code with a Swyx P280 USB phone"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["faster-whisper", "piper-tts", "numpy"]
+dependencies = ["faster-whisper", "piper-tts", "numpy", "libusb1"]
 
 [project.scripts]
 p280-bridge = "p280bridge.__main__:main"

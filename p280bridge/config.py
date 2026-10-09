@@ -16,6 +16,7 @@ VOICES = ("en_US-lessac-medium", "de_DE-thorsten-medium")
 
 @dataclass
 class Config:
+    audio_backend: str = "pipewire"        # "usb" = talk to the phone directly over USB (needed if its mic gives no audio)
     device_match: str = "Swyx_P280"        # substring of the PipeWire node names
     mic_match: str = ""                    # substring of the microphone node; empty = same as device_match
     whisper_model: str = "base"            # tiny/base/small/medium/large-v3 (small = more accurate, ~3x slower)

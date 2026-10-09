@@ -6,7 +6,8 @@ import unittest
 import numpy as np
 
 from p280bridge import notify, tts
-from p280bridge.audio import rms
+from p280bridge.audio import capture_session, rms, to_16k, tone_pcm
+from p280bridge.config import Config
 from p280bridge.bridge import normalize
 from p280bridge.hid import parse_input_report
 
@@ -79,6 +80,54 @@ class NotifyTests(unittest.TestCase):
         n = notify.event_to_note({"hook_event_name": "Notification",
                                   "notification_type": "permission_prompt", "message": "Allow Bash?"})
         self.assertEqual(n["kind"], "permission_prompt")
+
+
+class FakeMic:
+    """Stream object like UsbMic/PipeWireMic that plays back prepared PCM, then ends."""
+
+    def __init__(self, pcm: bytes):
+        self.pcm, self.pos = pcm, 0
+
+    def open(self):
+        pass
+
+    def read(self, timeout):
+        if self.pos >= len(self.pcm):
+            return None
+        chunk = self.pcm[self.pos:self.pos + 640]
+        self.pos += 640
+        return chunk
+
+    def close(self):
+        pass
+
+
+class AudioTests(unittest.TestCase):
+    def test_tone_length(self):
+        self.assertEqual(len(tone_pcm([440, 660], seconds=0.1)), 2 * 2 * 1600)
+
+    def test_to_16k(self):
+        pcm = (np.sin(np.arange(22050) / 10) * 8000).astype(np.int16).tobytes()
+        out = to_16k(pcm, 22050)
+        self.assertAlmostEqual(len(out) / 2, 16000, delta=2)
+        self.assertEqual(to_16k(pcm, 16000), pcm)
+
+    def test_capture_session_splits_at_pauses_and_flushes_tail(self):
+        loud = (np.sin(np.arange(16000) * 0.3) * 3000).astype(np.int16)  # 1 s of "speech"
+        quiet = np.zeros(16000, dtype=np.int16)
+        pcm = np.concatenate([quiet[:8000], loud, quiet, loud]).tobytes()  # speech, 1 s pause, speech, EOF
+        chunks = []
+        result = capture_session(FakeMic(pcm), Config(), lambda: False, chunks.append)
+        self.assertEqual(result, "stopped")
+        self.assertEqual(len(chunks), 2)
+        self.assertTrue(all(len(c) >= 16000 for c in chunks))
+
+    def test_capture_session_ignores_short_blips(self):
+        blip = (np.sin(np.arange(1600) * 0.3) * 3000).astype(np.int16)  # 0.1 s
+        pcm = np.concatenate([np.zeros(8000, dtype=np.int16), blip, np.zeros(32000, dtype=np.int16)]).tobytes()
+        chunks = []
+        capture_session(FakeMic(pcm), Config(), lambda: False, chunks.append)
+        self.assertEqual(chunks, [])
 
 
 class MiscTests(unittest.TestCase):

@@ -11,6 +11,9 @@ from . import audio, config, hid
 # Must sort before 73-seat-late.rules, which turns the uaccess tag into a per-user ACL.
 # GROUP=plugdev is a fallback for sessions without a logind seat.
 UDEV_RULE = ('KERNEL=="hidraw*", ATTRS{idVendor}=="2603", ATTRS{idProduct}=="0280", '
+             'GROUP="plugdev", MODE="0660", TAG+="uaccess"\n'
+             '# raw USB access, used by the direct-USB audio mode\n'
+             'SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2603", ATTR{idProduct}=="0280", '
              'GROUP="plugdev", MODE="0660", TAG+="uaccess"\n')
 UDEV_FILE = "/etc/udev/rules.d/70-swyx-p280.rules"
 OLD_UDEV_FILE = "/etc/udev/rules.d/99-swyx-p280.rules"  # earlier versions: ran too late to work
@@ -72,7 +75,11 @@ def can_open() -> bool:
 
 def setup_access():
     step(3, "Phone access permissions")
-    if can_open():
+    try:
+        up_to_date = open(UDEV_FILE).read() == UDEV_RULE
+    except OSError:
+        up_to_date = False
+    if can_open() and up_to_date:
         print("  Already allowed.")
         return
     print("  Your user may not access the phone's button/ring interface yet.")
@@ -84,7 +91,7 @@ def setup_access():
                    stdout=subprocess.DEVNULL)
     subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
     subprocess.run(["sudo", "udevadm", "trigger"], check=True)
-    time.sleep(1)
+    time.sleep(2)
     if not can_open():
         input("  Unplug the phone, plug it back in, then press Enter... ")
         if not wait_for(lambda: hid.find_hidraw() and can_open(), 15, "  Still no access."):
@@ -179,17 +186,59 @@ def choose_other_microphone(cfg, phone, stt):
         print("  Nothing heard from that microphone either.")
 
 
+def try_usb_mode(cfg, phone, stt) -> bool:
+    """Test the phone's mic + speaker through direct USB; save audio_backend = "usb" if it works."""
+    print("  Trying the phone's microphone directly over USB (the Linux sound driver cannot read it)...")
+    cfg.audio_backend = "usb"
+    try:
+        io = audio.open_audio(cfg)
+    except Exception as e:
+        print(f"  Direct USB mode failed: {e}")
+        cfg.audio_backend = "pipewire"
+        return False
+    ok = False
+    try:
+        print("  Say a short sentence (handset lifted)...")
+        if listen_once(cfg, phone, io.mic, stt) is not None:
+            print("  Now a beep on the phone speaker...")
+            io.speaker.tone([440, 660, 880], seconds=0.4)
+            ok = ask("  Did you hear it?")
+    finally:
+        io.close()
+    if ok:
+        config.save(audio_backend="usb", mic_match="")
+        print("  Saved: the bridge will use the phone directly over USB.")
+    else:
+        cfg.audio_backend = "pipewire"
+    return ok
+
+
 def test_microphone(cfg, phone):
     step(7, "Microphone test (keep the handset lifted)")
     from .stt import Transcriber
     stt = Transcriber(cfg)
-    source = audio.find_node("sources", cfg.mic_match or cfg.device_match)
-    print("  Say a short sentence, e.g. \"Hello Claude, can you hear me?\"")
-    text = listen_once(cfg, phone, source, stt)
-    if text is None:
-        choose_other_microphone(cfg, phone, stt)
-    elif not ask("  Is that about right?"):
-        print("  Tip: set whisper_model = \"medium\" in", config.CONFIG_FILE)
+    cfg.mic_match = ""  # test the phone's own microphone first
+    if cfg.audio_backend == "usb":
+        io = audio.open_audio(cfg)
+        try:
+            print("  Say a short sentence, e.g. \"Hello Claude, can you hear me?\"")
+            if listen_once(cfg, phone, io.mic, stt) is not None:
+                return
+        finally:
+            io.close()
+        cfg.audio_backend = "pipewire"
+    else:
+        source = audio.find_node("sources", cfg.device_match)
+        print("  Say a short sentence, e.g. \"Hello Claude, can you hear me?\"")
+        text = listen_once(cfg, phone, source, stt)
+        if text is not None:
+            config.save(mic_match="")
+            if not ask("  Is that about right?"):
+                print("  Tip: set whisper_model = \"small\" in", config.CONFIG_FILE)
+            return
+    if try_usb_mode(cfg, phone, stt):
+        return
+    choose_other_microphone(cfg, phone, stt)
 
 
 def test_ring(cfg, phone):

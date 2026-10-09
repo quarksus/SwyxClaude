@@ -1,3 +1,4 @@
 faster-whisper
 piper-tts
 numpy
+libusb1
