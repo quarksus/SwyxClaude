@@ -38,6 +38,39 @@ class NotifyTests(unittest.TestCase):
         os.unlink(f.name)
         self.assertEqual(note, {"kind": "stop", "text": "Which file?"})
 
+    def _write(self, rows):
+        f = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
+        f.write("\n".join(json.dumps(r) for r in rows) + "\n")
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return f.name
+
+    def test_transcript_ignores_previous_turn(self):
+        """Stop fired before the new answer was flushed: must not return the old answer."""
+        path = self._write([
+            {"type": "user", "message": {"content": "first question"}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "old answer"}]}},
+            {"type": "user", "message": {"content": "second question"}},
+            {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "..."}]}},
+        ])
+        self.assertEqual(notify.reply_since_last_prompt(path), "")
+
+    def test_transcript_current_turn_after_tool_use(self):
+        path = self._write([
+            {"type": "user", "message": {"content": "q1"}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "old"}]}},
+            {"type": "user", "message": {"content": [{"type": "text", "text": "q2"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "let me look"}]}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "x"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "new answer"}]}},
+        ])
+        self.assertEqual(notify.reply_since_last_prompt(path), "new answer")
+
+    def test_stop_prefers_last_assistant_message(self):
+        note = notify.event_to_note({"hook_event_name": "Stop", "last_assistant_message": "Fresh reply",
+                                     "transcript_path": "/nonexistent"})
+        self.assertEqual(note["text"], "Fresh reply")
+
     def test_idle_prompt_ignored(self):
         self.assertIsNone(notify.event_to_note(
             {"hook_event_name": "Notification", "notification_type": "idle_prompt"}))
