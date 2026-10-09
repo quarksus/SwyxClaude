@@ -1,0 +1,55 @@
+# P280 Claude Bridge
+
+Talk to Claude Code with a Swyx P280 USB phone.
+
+1. **Pick up the handset** → a rising beep means it is listening. Speak your prompt.
+2. After 1.5 s of silence the speech is transcribed locally (faster-whisper, German/English
+   auto-detected) and **typed into Claude Code's prompt** (and submitted).
+3. When Claude **stops or needs you** (finished answer / question / permission dialog) and the phone
+   is on the hook, it **rings once**. Pick up: Claude's message is read aloud (Piper TTS), then you reply.
+   If you are already on the phone, the message is read aloud immediately.
+
+Claude Code runs inside the bridge (`p280-bridge run` wraps `claude` in a pty), so you see everything
+in the same terminal. Hooks (`Stop`, `Notification`) are injected with `claude --settings`, so your
+own Claude settings are not touched.
+
+## Setup
+
+```sh
+./scripts/setup.sh           # venv, deps, Piper voices, Whisper "small" model (~700 MB total)
+./scripts/install-udev.sh    # once: lets your user access the phone's HID interface; replug phone
+```
+
+## Use
+
+```sh
+./p280-bridge run            # starts claude; extra args are passed to claude, e.g. run --resume
+./p280-bridge monitor        # print hook-switch / button events
+./p280-bridge probe-ring     # pulse the P280's LEDs/ring to see which output bit rings
+./p280-bridge devices        # show detected HID / audio nodes
+```
+
+Logs: `~/.local/state/p280-bridge/bridge.log` (set `BRIDGE_DEBUG=1` for more).
+
+## Configuration
+
+Optional `~/.config/p280-bridge/config.toml`, e.g.:
+
+```toml
+whisper_model = "medium"   # better accuracy, slower
+language = "de"            # skip auto-detection
+auto_submit = false        # only type the text, press Enter yourself
+ring_method = "tone"       # auto | hid | tone | both
+voice_permissions = false  # don't answer permission dialogs by voice
+```
+
+See `p280bridge/config.py` for all options.
+
+## Notes
+
+- Saying **yes/ja/ok** (or **no/nein**) right after a permission dialog rings approves (Enter) or rejects (Esc)
+  it. Only exact words count; disable with `voice_permissions = false`.
+- The P280 appears to deliver no microphone audio while on-hook, which is fine here (we only listen off-hook).
+- The HID ring (output report 2, bit 0) depends on the phone firmware; if the phone doesn't physically
+  ring, use `ring_method = "tone"` (plays a ring tone through the phone speaker).
+- Tests: `.venv/bin/python -m unittest discover -s tests`. `p280_test.py` is the standalone hardware test.
