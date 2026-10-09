@@ -42,6 +42,7 @@ Optional `~/.config/p280-bridge/config.toml`, e.g.:
 
 ```toml
 whisper_model = "medium"   # better accuracy, slower
+mic_match = "StreamCam"    # use another microphone (substring of its name) if the phone mic does not work
 language = "de"            # skip auto-detection
 auto_submit = false        # only type the text, press Enter yourself
 ring_method = "tone"       # auto | hid | tone | both

@@ -26,6 +26,12 @@ def find_node(kind: str, match: str) -> str:
     raise RuntimeError(f"No {kind} matching {match!r} found")
 
 
+def list_sources() -> list[str]:
+    """Names of all real (non-monitor) capture nodes."""
+    out = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True).stdout
+    return [l.split("\t")[1] for l in out.splitlines() if not l.split("\t")[1].endswith(".monitor")]
+
+
 def tone_wav(path: str, freqs, seconds=0.15, volume=0.4):
     with wave.open(path, "wb") as w:
         w.setnchannels(1)

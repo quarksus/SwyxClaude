@@ -17,6 +17,7 @@ VOICES = ("en_US-lessac-medium", "de_DE-thorsten-medium")
 @dataclass
 class Config:
     device_match: str = "Swyx_P280"        # substring of the PipeWire node names
+    mic_match: str = ""                    # substring of the microphone node; empty = same as device_match
     whisper_model: str = "small"           # tiny/base/small/medium/large-v3
     language: str | None = None            # None = auto-detect (de/en/...)
     auto_submit: bool = True               # press Enter after typing the transcript

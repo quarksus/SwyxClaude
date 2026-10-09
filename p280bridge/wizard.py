@@ -142,21 +142,48 @@ def test_hook(cfg) -> hid.Phone:
     return phone
 
 
+def listen_once(cfg, phone, source, stt):
+    deadline = time.time() + 20
+    reason, samples = audio.record_utterance(
+        source, cfg, lambda: time.time() > deadline or not phone.offhook)
+    if reason != "speech":
+        return None
+    text, lang = stt.transcribe(samples)
+    print(f"  I understood ({lang}): \"{text}\"")
+    return text
+
+
+def choose_other_microphone(cfg, phone, stt):
+    sources = audio.list_sources()
+    print("  The phone's microphone delivered no audio. Available microphones:")
+    for i, name in enumerate(sources, 1):
+        print(f"   {i}. {name}")
+    while True:
+        choice = input("  Pick a number to use instead (Enter to skip): ").strip()
+        if not choice:
+            return
+        try:
+            name = sources[int(choice) - 1]
+        except (ValueError, IndexError):
+            continue
+        print("  Say a short sentence...")
+        if listen_once(cfg, phone, name, stt):
+            config.save(mic_match=name)
+            print("  Saved. The phone still handles the hook, ring and speaker.")
+            return
+        print("  Nothing heard from that microphone either.")
+
+
 def test_microphone(cfg, phone):
     step(7, "Microphone test (keep the handset lifted)")
     from .stt import Transcriber
     stt = Transcriber(cfg)
-    source = audio.find_node("sources", cfg.device_match)
+    source = audio.find_node("sources", cfg.mic_match or cfg.device_match)
     print("  Say a short sentence, e.g. \"Hello Claude, can you hear me?\"")
-    deadline = time.time() + 30
-    reason, samples = audio.record_utterance(
-        source, cfg, lambda: time.time() > deadline or not phone.offhook)
-    if reason != "speech":
-        print("  Nothing heard. Check the microphone with `p280-bridge devices`; continuing anyway.")
-        return
-    text, lang = stt.transcribe(samples)
-    print(f"  I understood ({lang}): \"{text}\"")
-    if not ask("  Is that about right?"):
+    text = listen_once(cfg, phone, source, stt)
+    if text is None:
+        choose_other_microphone(cfg, phone, stt)
+    elif not ask("  Is that about right?"):
         print("  Tip: set whisper_model = \"medium\" in", config.CONFIG_FILE)
 
 
