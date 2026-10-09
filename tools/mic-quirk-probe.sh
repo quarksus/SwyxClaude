@@ -40,15 +40,17 @@ try() {
   else
     echo "  note: no 'cannot get freq' after replug -> flag was applied"
   fi
-  journalctl -k --no-pager --since "$mark" | grep -iE "usb 1-|snd.usb|urb|endpoint|error|fail" | tail -12 | cut -c1-200 | sed 's/^/  kernel: /'
+  journalctl -k --no-pager --since "$mark" | grep -iE "active: -|overflow|babble|error|fail|stall" | sort | uniq -c | head -4 | cut -c1-160 | sed 's/^/  kernel: /'
   [ "$size" -gt 20000 ]
 }
 
-for f in "get_sample_rate" "0x1" "" "ignore_ctl_error" "get_sample_rate+ignore_ctl_error" "playback_first" \
-         "playback_first+get_sample_rate" "set_iface_first" "force_iface_reset" "disable_autosuspend" \
-         "fixed_rate" "ctl_msg_delay" "get_sample_rate+set_iface_first+force_iface_reset"; do
+# Flag *names* were not reliably recognised by this kernel (only the numeric form had an effect),
+# so try numeric values: bit 0 (skip sample-rate GET, needed to silence "cannot get freq") combined
+# with each other single quirk bit of snd-usb-audio, one at a time.
+for bit in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23; do
+  f=$(printf '0x%x' $(( 1 | (1 << bit) )))
   if try "$f"; then
-    echo; echo ">>> WORKS with flags: ${f:-<none>}"; echo "$f" > /tmp/mic-probe.result; exit 0
+    echo; echo ">>> WORKS with flags: $f (bit $bit)"; echo "$f" > /tmp/mic-probe.result; exit 0
   fi
 done
 echo; echo ">>> No flag combination made the microphone work."
