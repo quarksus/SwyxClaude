@@ -64,6 +64,39 @@ class Speaker:
                 pass
         return True
 
+    def play_stream(self, chunks, abort=lambda: False):
+        """Play (pcm_bytes, sample_rate) chunks as they are produced; False if aborted."""
+        proc = None
+        try:
+            for data, rate in chunks:
+                if abort():
+                    return False
+                if proc is None:
+                    proc = subprocess.Popen(
+                        ["pw-play", "--raw", "--target", self.sink, "--rate", str(rate), "--channels", "1",
+                         "--format", "s16", "-"], stdin=subprocess.PIPE)
+                    self._proc = proc
+                try:
+                    proc.stdin.write(data)
+                    proc.stdin.flush()
+                except BrokenPipeError:
+                    return False
+            if proc is None:
+                return True
+            proc.stdin.close()
+            while proc.poll() is None:
+                if abort():
+                    return False
+                try:
+                    proc.wait(0.1)
+                except subprocess.TimeoutExpired:
+                    pass
+            return True
+        finally:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
     def tone(self, freqs, **kw):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "t.wav")

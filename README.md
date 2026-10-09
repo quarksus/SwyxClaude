@@ -3,7 +3,7 @@
 Talk to Claude Code with a Swyx P280 USB phone.
 
 1. **Pick up the handset** → a rising beep means it is listening. Speak your prompt.
-2. After 1.5 s of silence the speech is transcribed locally (faster-whisper, German/English
+2. After 0.8 s of silence the speech is transcribed locally (faster-whisper, German/English
    auto-detected) and **typed into Claude Code's prompt** (and submitted).
 3. When Claude **stops or needs you** (finished answer / question / permission dialog) and the phone
    is on the hook, it **rings once**. Pick up: Claude's message is read aloud (Piper TTS), then you reply.
@@ -41,7 +41,7 @@ Logs: `~/.local/state/p280-bridge/bridge.log` (`BRIDGE_DEBUG=1` for more).
 Optional `~/.config/p280-bridge/config.toml`, e.g.:
 
 ```toml
-whisper_model = "medium"   # better accuracy, slower
+whisper_model = "small"    # more accurate, ~3x slower than the default "base"
 mic_match = "StreamCam"    # use another microphone (substring of its name) if the phone mic does not work
 language = "de"            # skip auto-detection
 auto_submit = false        # only type the text, press Enter yourself

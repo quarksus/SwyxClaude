@@ -18,10 +18,10 @@ VOICES = ("en_US-lessac-medium", "de_DE-thorsten-medium")
 class Config:
     device_match: str = "Swyx_P280"        # substring of the PipeWire node names
     mic_match: str = ""                    # substring of the microphone node; empty = same as device_match
-    whisper_model: str = "small"           # tiny/base/small/medium/large-v3
+    whisper_model: str = "base"            # tiny/base/small/medium/large-v3 (small = more accurate, ~3x slower)
     language: str | None = None            # None = auto-detect (de/en/...)
     auto_submit: bool = True               # press Enter after typing the transcript
-    silence_seconds: float = 1.5           # end of utterance after this much silence
+    silence_seconds: float = 0.8           # end of utterance after this much silence
     max_utterance_seconds: float = 90.0
     min_rms: float = 120.0                 # lowest speech energy threshold (int16 RMS)
     ring_method: str = "auto"              # auto (HID, tone fallback) | hid | tone | both

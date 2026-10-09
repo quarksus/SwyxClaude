@@ -97,6 +97,7 @@ class Bridge:
     def run_forever(self):
         threading.Thread(target=self._serve_notifications, daemon=True, name="notify").start()
         threading.Thread(target=self.stt.load, daemon=True, name="whisper-preload").start()
+        threading.Thread(target=tts.preload, args=(self.cfg,), daemon=True, name="tts-preload").start()
         log.info("bridge ready")
         while not self._stop.is_set():
             self.wake.wait(0.5)

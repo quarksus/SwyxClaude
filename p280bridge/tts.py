@@ -2,9 +2,7 @@
 import logging
 import os
 import re
-import subprocess
-import sys
-import tempfile
+import threading
 
 log = logging.getLogger(__name__)
 GERMAN_HINTS = {"der", "die", "das", "und", "ist", "nicht", "ich", "sie", "es", "ein", "eine", "mit",
@@ -29,20 +27,35 @@ def clean_for_speech(text: str, limit: int) -> str:
     return text
 
 
-def synthesize(text: str, cfg, lang: str | None, out_wav: str):
-    german = (lang == "de") if lang else looks_german(text)
-    voice = cfg.piper_voice_de if german else cfg.piper_voice_en
-    if not os.path.exists(voice):
-        raise RuntimeError(f"Piper voice missing: {voice} (run ./scripts/setup.sh)")
-    subprocess.run([sys.executable, "-m", "piper", "-m", voice, "-f", out_wav],
-                   input=text.encode(), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+_voices: dict = {}
+_lock = threading.Lock()
+
+
+def load_voice(path: str):
+    """Load a Piper voice once and keep it in memory (loading is the slow part)."""
+    with _lock:
+        if path not in _voices:
+            if not os.path.exists(path):
+                raise RuntimeError(f"Piper voice missing: {path} (run `p280-bridge init`)")
+            from piper import PiperVoice
+            _voices[path] = PiperVoice.load(path)
+        return _voices[path]
+
+
+def preload(cfg):
+    for path in (cfg.piper_voice_en, cfg.piper_voice_de):
+        try:
+            load_voice(path)
+        except Exception:
+            log.exception("could not preload voice %s", path)
 
 
 def speak(text: str, cfg, speaker, lang=None, abort=lambda: False):
+    """Synthesize sentence by sentence and start playing as soon as the first one is ready."""
     text = clean_for_speech(text, cfg.max_spoken_chars)
     if not text:
         return
-    with tempfile.TemporaryDirectory() as d:
-        wav = os.path.join(d, "speech.wav")
-        synthesize(text, cfg, lang, wav)
-        speaker.play(wav, abort)
+    german = (lang == "de") if lang else looks_german(text)
+    voice = load_voice(cfg.piper_voice_de if german else cfg.piper_voice_en)
+    chunks = voice.synthesize(text)
+    speaker.play_stream(((c.audio_int16_bytes, c.sample_rate) for c in chunks), abort)
