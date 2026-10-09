@@ -44,6 +44,7 @@ whisper_model = "small"    # more accurate, ~3x slower than the default "base"
 mic_match = "StreamCam"    # use another microphone (substring of its name) if the phone mic does not work
 language = "de"            # skip auto-detection
 auto_submit = false        # only type the text, press Enter yourself
+idle_timeout_seconds = 10  # lifted but silent this long: send what was said and end the call (0 = off)
 ring_method = "tone"       # auto | hid | tone | both
 voice_permissions = false  # don't answer permission dialogs by voice
 ```

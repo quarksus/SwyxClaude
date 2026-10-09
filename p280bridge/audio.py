@@ -6,6 +6,7 @@ import select
 import struct
 import subprocess
 import tempfile
+import time
 import wave
 
 import numpy as np
@@ -112,13 +113,15 @@ def rms(frame: bytes) -> float:
 MIN_VOICED_MS = 300  # ignore clicks/blips shorter than this
 
 
-def capture_session(source, cfg, should_stop, on_chunk, stats=None):
+def capture_session(source, cfg, should_stop, on_chunk, stats=None, idle_timeout=None):
     """Listen on one continuous capture stream until should_stop() is true.
 
     Speech is cut into chunks at pauses (cfg.silence_seconds) and handed to on_chunk(samples)
     as int16 arrays, so transcription can run while the user is still talking. Whatever is
     still being said when should_stop() fires is flushed as a last chunk.
     stats (optional dict) receives the peak level and speech threshold for diagnostics.
+    If idle_timeout (seconds) is set and nobody speaks for that long, the last chunk is flushed
+    and "timeout" is returned; otherwise returns "stopped".
     """
     proc = subprocess.Popen(
         ["parec", f"--device={source}", f"--rate={RATE}", "--channels=1",
@@ -131,6 +134,7 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None):
     threshold = cfg.min_rms
     loud = voiced = silent = 0
     speaking = False
+    last_voice = time.monotonic()
 
     def flush():
         nonlocal frames, speaking, loud, voiced, silent
@@ -141,6 +145,9 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None):
 
     try:
         while not should_stop():
+            if idle_timeout and time.monotonic() - last_voice > idle_timeout:
+                flush()
+                return "timeout"
             if not select.select([proc.stdout], [], [], 0.1)[0]:
                 continue
             chunk = os.read(proc.stdout.fileno(), 4096)
@@ -150,6 +157,8 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None):
             while len(buf) >= FRAME_BYTES:
                 frame, buf = buf[:FRAME_BYTES], buf[FRAME_BYTES:]
                 level = rms(frame)
+                if level > threshold:
+                    last_voice = time.monotonic()
                 if stats is not None:
                     stats["peak"] = max(stats.get("peak", 0.0), level)
                     stats["threshold"] = threshold
@@ -174,6 +183,7 @@ def capture_session(source, cfg, should_stop, on_chunk, stats=None):
                         len(frames) * FRAME_MS / 1000 >= cfg.max_utterance_seconds:
                     flush()
         flush()
+        return "stopped"
     finally:
         proc.kill()
         proc.wait()

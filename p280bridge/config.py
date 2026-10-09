@@ -22,6 +22,7 @@ class Config:
     language: str | None = None            # None = auto-detect (de/en/...)
     auto_submit: bool = True               # press Enter after typing the transcript
     silence_seconds: float = 0.8           # pause used to split long speech so it is transcribed while you talk
+    idle_timeout_seconds: float = 10.0     # off-hook but silent this long = send what was said and end the call (0 = off)
     max_utterance_seconds: float = 60.0    # longest single chunk before it is split anyway
     min_rms: float = 120.0                 # lowest speech energy threshold (int16 RMS)
     ring_method: str = "auto"              # auto (HID, tone fallback) | hid | tone | both

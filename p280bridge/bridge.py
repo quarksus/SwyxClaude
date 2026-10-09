@@ -135,17 +135,25 @@ class Bridge:
         self.handle_note(self.pop_latest_note())
         pool = ThreadPoolExecutor(max_workers=1)  # one worker: Whisper runs one job at a time
         jobs = []
+        ended = "stopped"
         if self.phone.offhook:
-            audio.capture_session(
+            ended = audio.capture_session(
                 self.source, self.cfg, lambda: not self.phone.offhook or self._stop.is_set(),
-                lambda samples: jobs.append(pool.submit(self._transcribe, samples)))
-        # Handset down = finished talking. Chunks were transcribed while speaking.
+                lambda samples: jobs.append(pool.submit(self._transcribe, samples)),
+                idle_timeout=self.cfg.idle_timeout_seconds or None)
+        # Handset down (or silence timeout) = finished talking. Chunks were transcribed while speaking.
         results = [j.result() for j in jobs]
         pool.shutdown()
         text = " ".join(t for t in results if t).strip()
         log.info("session end, %d chunk(s): %r", len(jobs), text)
+        if ended == "timeout":
+            log.info("idle timeout after %.0fs of silence", self.cfg.idle_timeout_seconds)
+            self.speaker.tone([440, 330])  # "I stopped listening - please hang up"
         if text:
             self.send_to_claude(text)
+        # After a timeout the handset is still lifted: wait for it to go down before listening again.
+        while self.phone.offhook and not self._stop.is_set():
+            self._stop.wait(0.2)
 
     def _transcribe(self, samples) -> str:
         try:
